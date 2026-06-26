@@ -7,10 +7,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"sync/atomic"
-	"log/slog"
 	"time"
 )
 
@@ -44,29 +44,29 @@ func ClearCache[T comparable](cache map[T]*CacheItem) {
 type Peer struct {
 	*User
 	Challenge []byte
-	RInfo net.Addr
+	RInfo     net.Addr
 }
 
 type User struct {
 	Username string
-	Key string
+	Key      string
 }
 
 type PeerManager struct {
 	Peers map[string]*CacheItem
 }
 
-func (pm *PeerManager) Delete (addr net.Addr) {
+func (pm *PeerManager) Delete(addr net.Addr) {
 	delete(pm.Peers, addr.String())
 }
 
-func (pm *PeerManager) Get (addr net.Addr) *Peer {
+func (pm *PeerManager) Get(addr net.Addr) *Peer {
 	key := addr.String()
 	peer, ok := pm.Peers[addr.String()]
 	if !ok {
-		pm.Peers[key] = &CacheItem{&Peer{RInfo: addr}, time.Now().Add(30*time.Second)}
+		pm.Peers[key] = &CacheItem{&Peer{RInfo: addr}, time.Now().Add(30 * time.Second)}
 	} else {
-		peer.ExpireAt = time.Now().Add(30*time.Second)
+		peer.ExpireAt = time.Now().Add(30 * time.Second)
 	}
 	return peer.Peer
 }
@@ -87,7 +87,9 @@ func (pm *PeerManager) GetUsersLogged() (count int) {
 func (pm *PeerManager) All(except net.Addr) []*Peer {
 	peers := []*Peer{}
 	for _, p := range pm.Peers {
-		if p.Peer.RInfo == except {continue}
+		if p.Peer.RInfo == except {
+			continue
+		}
 		peers = append(peers, p.Peer)
 	}
 	return peers
@@ -96,24 +98,24 @@ func (pm *PeerManager) All(except net.Addr) []*Peer {
 type SLPServer struct {
 	IpCache map[uint32]*CacheItem
 	*PeerManager
-	UploadLastSec atomic.Uint64
+	UploadLastSec   atomic.Uint64
 	DownloadLastSec atomic.Uint64
 	AuthProvider
-	Port int
+	Port     int
 	SendChan chan Packet
 }
 
 type Packet struct {
-	Msg []byte
+	Msg  []byte
 	Addr *net.UDPAddr
 }
 
 func NewSLPServer(port int, auth AuthProvider) *SLPServer {
 	return &SLPServer{
-		IpCache: make(map[uint32]*CacheItem),
-		PeerManager: &PeerManager{},
+		IpCache:      make(map[uint32]*CacheItem),
+		PeerManager:  &PeerManager{},
 		AuthProvider: auth,
-		Port: port,
+		Port:         port,
 	}
 }
 
@@ -129,7 +131,7 @@ type Head struct {
 func (server *SLPServer) ParseHead(msg []byte) *Head {
 	return &Head{
 		FowarderType: FowarderType(msg[0] & 0x7f),
-		IsEncrypted: msg[0] & 0x80 != 0,
+		IsEncrypted:  msg[0]&0x80 != 0,
 	}
 }
 
@@ -196,7 +198,7 @@ func (server *SLPServer) OnNeedAuth(peer *Peer, fwdType FowarderType, payload []
 			go func(ch chan<- bool) {
 				ch <- server.AuthProvider.Verify(username, peer.Challenge[1:], response)
 			}(result)
-			
+
 			correctPassword := false
 			select {
 			case res := <-result:
@@ -207,7 +209,7 @@ func (server *SLPServer) OnNeedAuth(peer *Peer, fwdType FowarderType, payload []
 
 			if !correctPassword {
 				err = fmt.Errorf("login: incorrect password")
-				
+
 			}
 
 			if err != nil {
@@ -236,7 +238,7 @@ func (server *SLPServer) OnIpv4Frag(peer *Peer, payload []byte) {
 	binary.Read(buf, binary.BigEndian, &src)
 	binary.Read(buf, binary.BigEndian, &dst)
 
-	server.IpCache[src] = &CacheItem{peer, time.Now().Add(30*time.Second)}
+	server.IpCache[src] = &CacheItem{peer, time.Now().Add(30 * time.Second)}
 
 	if dstPeer, ok := server.IpCache[dst]; ok {
 		server.SendTo(dstPeer.Peer, Ipv4Frag, payload)
@@ -260,7 +262,7 @@ func (server *SLPServer) OnIpv4(peer *Peer, payload []byte) {
 	binary.Read(buf, binary.BigEndian, &src)
 	binary.Read(buf, binary.BigEndian, &dst)
 
-	server.IpCache[src] = &CacheItem{peer, time.Now().Add(30*time.Second)}
+	server.IpCache[src] = &CacheItem{peer, time.Now().Add(30 * time.Second)}
 
 	if dstPeer, ok := server.IpCache[dst]; ok {
 		server.SendTo(dstPeer.Peer, Ipv4, payload)
@@ -273,14 +275,14 @@ func (server *SLPServer) SendTo(peer *Peer, fwdType FowarderType, payload []byte
 	if OutputEncrypted {
 		slog.Warn("OutputEncrypted not implemented")
 	}
-	
+
 	server.SendToRaw(peer.RInfo, append([]byte{byte(fwdType)}, payload...))
 }
 
 func (server *SLPServer) SendToRaw(rinfo net.Addr, msg []byte) {
 	addr, err := net.ResolveUDPAddr("udp", rinfo.String())
 	if err != nil {
-		slog.Error("UPD address resolving error: "+err.Error())
+		slog.Error("UPD address resolving error: " + err.Error())
 	}
 
 	server.UploadLastSec.Add(uint64(len(msg)))
@@ -308,16 +310,16 @@ func (server *SLPServer) Run() context.CancelFunc {
 			log.Fatalf("[FATAL] Couldn't listen on %v: %v\f", conn.LocalAddr().String(), err)
 		}
 		defer conn.Close()
-		
+
 		buffer := make([]byte, 2048)
 
 		slog.Info("Server listening on %v", conn.LocalAddr().String())
 
-		loop:
+	loop:
 		for {
 			n, remoteAddr, err := conn.ReadFromUDP(buffer)
 			if err != nil {
-				slog.Error("Couldn't read packet: "+err.Error())
+				slog.Error("Couldn't read packet: " + err.Error())
 			}
 
 			msg := buffer[:n]
@@ -329,7 +331,7 @@ func (server *SLPServer) Run() context.CancelFunc {
 				if err != nil {
 					server.PeerManager.Delete(packet.Addr)
 				}
-			case <- ctx.Done():
+			case <-ctx.Done():
 				break loop
 			default:
 			}
@@ -339,11 +341,18 @@ func (server *SLPServer) Run() context.CancelFunc {
 	}()
 
 	go func() {
-		str := fmt.Sprintf("Clients: %v | Upload: %vKB/s | Dowload: %vKB/s", server.GetClientSize(), server.UploadLastSec.Load(), server.DownloadLastSec.Load())
-		fmt.Printf(str)
-		fmt.Printf(strings.Repeat("\b", len(str)))
-		server.Tidy()
-		time.Sleep(time.Second)
+		for {
+			str := fmt.Sprintf("Clients: %v | Upload: %vKB/s | Dowload: %vKB/s", server.GetClientSize(), server.UploadLastSec.Load(), server.DownloadLastSec.Load())
+			fmt.Printf(str)
+			fmt.Printf(strings.Repeat("\b", len(str)))
+			server.Tidy()
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			time.Sleep(time.Second)
+		}
 	}()
 
 	return cancel
