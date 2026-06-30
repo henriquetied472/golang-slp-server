@@ -163,16 +163,12 @@ func (server *SLPServer) OnMessage(msg []byte, rinfo net.Addr) {
 func (server *SLPServer) OnPacket(peer *Peer, fwdType FowarderType, payload []byte) {
 	switch fwdType {
 	case Keepalive:
-		break
 	case Ipv4:
 		server.OnIpv4(peer, payload)
-		break
 	case Ping:
 		slog.Error("encrypted ping?")
-		break
 	case Ipv4Frag:
 		server.OnIpv4Frag(peer, payload)
-		break
 	}
 }
 
@@ -213,7 +209,7 @@ func (server *SLPServer) OnNeedAuth(peer *Peer, fwdType FowarderType, payload []
 			}
 
 			if err != nil {
-				slog.Error("%v | user: %v", err, username)
+				slog.Error("%v | user: %v", err.Error(), username)
 				server.SendInfo(peer, err.Error())
 			}
 		}
@@ -313,7 +309,7 @@ func (server *SLPServer) Run() context.CancelFunc {
 
 		buffer := make([]byte, 2048)
 
-		slog.Info("Server listening on %v", conn.LocalAddr().String())
+		slog.Info("Server listening on " + conn.LocalAddr().String())
 
 	loop:
 		for {
@@ -343,8 +339,8 @@ func (server *SLPServer) Run() context.CancelFunc {
 	go func() {
 		for {
 			str := fmt.Sprintf("Clients: %v | Upload: %vKB/s | Dowload: %vKB/s", server.GetClientSize(), server.UploadLastSec.Load(), server.DownloadLastSec.Load())
-			fmt.Printf(str)
-			fmt.Printf(strings.Repeat("\b", len(str)))
+			fmt.Print(str)
+			fmt.Print(strings.Repeat("\b", len(str)))
 			server.Tidy()
 			select {
 			case <-ctx.Done():
