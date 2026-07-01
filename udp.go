@@ -296,8 +296,7 @@ func (server *SLPServer) Tidy() {
 	ClearCache(server.IpCache)
 }
 
-func (server *SLPServer) Run() context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
+func (server *SLPServer) Run(ctx context.Context) {
 	server.SendChan = make(chan Packet, 2)
 
 	go func() {
@@ -350,8 +349,6 @@ func (server *SLPServer) Run() context.CancelFunc {
 			time.Sleep(time.Second)
 		}
 	}()
-
-	return cancel
 }
 
 func must[T any](val T, err error) T {
