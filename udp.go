@@ -299,6 +299,10 @@ func (server *SLPServer) Tidy() {
 func (server *SLPServer) Run(ctx context.Context) {
 	server.SendChan = make(chan Packet, 2)
 
+	if auth, ok := server.AuthProvider.(*JsonAuthProvider); ok {
+		auth.Run(ctx)
+	}
+
 	go func() {
 		conn, err := net.ListenUDP("udp6", must(net.ResolveUDPAddr("udp", ":"+fmt.Sprint(server.Port))))
 		if err != nil {
