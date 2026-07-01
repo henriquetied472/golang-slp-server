@@ -27,6 +27,10 @@ type AuthProvider interface {
 	GetUserPasswordSHA1(username string) []byte
 }
 
+
+// HttpAuthProvider implementation start
+
+
 type HttpAuthProvider struct {
 	Url string
 }
@@ -64,6 +68,13 @@ func (auth *HttpAuthProvider) GetUserPasswordSHA1(username string) []byte {
 	}
 	return must(hex.DecodeString(res.PasswordSHA1))
 }
+
+
+// HttpAuthProvider implementation end
+
+
+// JsonAuthProvider implementation start
+
 
 type JsonAuthProvider struct {
 	Table map[string]any
@@ -157,6 +168,13 @@ func (auth *JsonAuthProvider) Run(ctx context.Context) {
 	}
 }
 
+
+// JsonAuthProvider implementation end
+
+
+// CustomAuthProvider implementation start
+
+
 type CustomAuthProvider struct {
 	Username string
 	SHA1 []byte
@@ -182,3 +200,5 @@ func (auth *CustomAuthProvider) GetUserPasswordSHA1(username string) []byte {
 	return auth.SHA1
 }
 
+
+// CustomAuthProvider implementation end
