@@ -157,3 +157,28 @@ func (auth *JsonAuthProvider) Run(ctx context.Context) {
 	}
 }
 
+type CustomAuthProvider struct {
+	Username string
+	SHA1 []byte
+}
+
+func NewCustomAuthProvider(username, password string) *CustomAuthProvider {
+	return &CustomAuthProvider{
+		Username: username,
+		SHA1: SHA1(password),
+	}
+}
+
+func (auth *CustomAuthProvider) Verify(username string, challenge []byte, response []byte) bool {
+	sha1 := auth.GetUserPasswordSHA1(username)
+	return slices.Equal(SHA1(append(sha1, challenge...)), response)
+}
+
+func (auth *CustomAuthProvider) GetUserPasswordSHA1(username string) []byte {
+	if username != auth.Username {
+		slog.Error("CustomAuthProvider: no such user calle \"" + username + "\"")
+		return nil
+	}
+	return auth.SHA1
+}
+
