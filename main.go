@@ -23,7 +23,7 @@ func init() {
 	flag.StringVar(&jsonAuth, "jsonAuth", "", "define JsonAuthProvider file")
 	flag.StringVar(&simpleAuth, "simpleAuth", "", "define CustomAuthProvider username and password (username:password)")
 	flag.IntVar(&port, "port", 11451, "define server port")
-	flag.BoolVar(&debug, "debug", false, "")
+	flag.BoolVar(&debug, "debug", false, "enable debug messages")
 	flag.BoolVar(&ignoreKeepaliveDebug, "ikdebug", false, "ignore Keepalive debug messages")
 	flag.Parse()
 }
