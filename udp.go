@@ -9,7 +9,9 @@ import (
 	"log"
 	"log/slog"
 	"net"
-	"strings"
+	"net/netip"
+
+	// "strings"
 	"sync/atomic"
 	"time"
 )
@@ -27,6 +29,8 @@ const (
 	OutputEncrypted = false
 )
 
+var FowarderTypeName = []string{"Keepalive", "Ipv4", "Ping", "Ipv4Frag", "AuthMe"}
+
 type CacheItem struct {
 	*Peer
 	ExpireAt time.Time
@@ -35,7 +39,8 @@ type CacheItem struct {
 func ClearCache[T comparable](cache map[T]*CacheItem) {
 	now := time.Now()
 	for k, c := range cache {
-		if c.ExpireAt.Compare(now) >= 0 {
+		if c.ExpireAt.Compare(now) < 0 {
+			slog.Debug("Expired cache item beign cleared", "key", k, "expire-at", c.ExpireAt.String(), "now", time.Now().String(), "difference", c.ExpireAt.Compare(time.Now()))
 			delete(cache, k)
 		}
 	}
@@ -62,9 +67,10 @@ func (pm *PeerManager) Delete(addr net.Addr) {
 
 func (pm *PeerManager) Get(addr net.Addr) *Peer {
 	key := addr.String()
-	peer, ok := pm.Peers[addr.String()]
+	peer, ok := pm.Peers[key]
 	if !ok {
 		pm.Peers[key] = &CacheItem{&Peer{RInfo: addr}, time.Now().Add(30 * time.Second)}
+		peer = pm.Peers[key]
 	} else {
 		peer.ExpireAt = time.Now().Add(30 * time.Second)
 	}
@@ -113,7 +119,7 @@ type Packet struct {
 func NewSLPServer(port int, auth AuthProvider) *SLPServer {
 	return &SLPServer{
 		IpCache:      make(map[uint32]*CacheItem),
-		PeerManager:  &PeerManager{},
+		PeerManager:  &PeerManager{Peers: make(map[string]*CacheItem)},
 		AuthProvider: auth,
 		Port:         port,
 	}
@@ -147,9 +153,20 @@ func (server *SLPServer) OnMessage(msg []byte, rinfo net.Addr) {
 		server.OnPing(rinfo, msg)
 		return
 	}
-
+	
 	peer := server.PeerManager.Get(rinfo)
 	payload := msg[1:]
+	
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) && (ignoreKeepaliveDebug == (head.FowarderType!=0)) {
+		var fwdTypeName string
+		if int(head.FowarderType) < len(FowarderTypeName) {
+			fwdTypeName = FowarderTypeName[head.FowarderType]
+		} else {
+			fwdTypeName = "Info"
+		}
+
+		slog.Debug("New message: ", "rinfo", rinfo.String(), "fowarder-type", fwdTypeName, "is-encrypted", head.IsEncrypted, "size", len(payload), "payload", fmt.Sprintf("%#v", payload))
+	}
 
 	if server.AuthProvider != nil {
 		if peer.User == nil {
@@ -257,6 +274,8 @@ func (server *SLPServer) OnIpv4(peer *Peer, payload []byte) {
 	buf.Next(12)
 	binary.Read(buf, binary.BigEndian, &src)
 	binary.Read(buf, binary.BigEndian, &dst)
+	slog.Debug("Ipv4 event source: ", "ipv4", netip.AddrFrom4([4]byte(binary.BigEndian.AppendUint32([]byte{}, src))).String())
+	slog.Debug("Ipv4 event destination: ", "ipv4", netip.AddrFrom4([4]byte(binary.BigEndian.AppendUint32([]byte{}, dst))).String())
 
 	server.IpCache[src] = &CacheItem{peer, time.Now().Add(30 * time.Second)}
 
@@ -272,6 +291,7 @@ func (server *SLPServer) SendTo(peer *Peer, fwdType FowarderType, payload []byte
 		slog.Warn("OutputEncrypted not implemented")
 	}
 
+	slog.Debug("Sended message: ", "rinfo", peer.RInfo.String(), "fowarder-type", fwdType, "size", len(payload), "payload", fmt.Sprintf("%#v", payload))
 	server.SendToRaw(peer.RInfo, append([]byte{byte(fwdType)}, payload...))
 }
 
@@ -297,20 +317,20 @@ func (server *SLPServer) Tidy() {
 }
 
 func (server *SLPServer) Run(ctx context.Context) {
-	server.SendChan = make(chan Packet, 2)
+	server.SendChan = make(chan Packet, 20)
 
 	if auth, ok := server.AuthProvider.(*JsonAuthProvider); ok {
 		auth.Run(ctx)
 	}
 
 	go func() {
-		conn, err := net.ListenUDP("udp6", must(net.ResolveUDPAddr("udp", ":"+fmt.Sprint(server.Port))))
+		conn, err := net.ListenUDP("udp", must(net.ResolveUDPAddr("udp", ":"+fmt.Sprint(server.Port))))
 		if err != nil {
 			log.Fatalf("[FATAL] Couldn't listen on %v: %v\f", conn.LocalAddr().String(), err)
 		}
 		defer conn.Close()
 
-		buffer := make([]byte, 2048)
+		buffer := make([]byte, 4096)
 
 		slog.Info("Server listening on " + conn.LocalAddr().String())
 
@@ -326,8 +346,10 @@ func (server *SLPServer) Run(ctx context.Context) {
 
 			select {
 			case packet := <-server.SendChan:
-				_, err := conn.WriteToUDP(packet.Msg, packet.Addr)
+				n, err := conn.WriteToUDP(packet.Msg, packet.Addr)
+				slog.Debug("Sending UDP Packet: ", "size", n, "addr", packet.Addr.String())
 				if err != nil {
+					slog.Debug("Sending UDP Packet failed")
 					server.PeerManager.Delete(packet.Addr)
 				}
 			case <-ctx.Done():
@@ -341,16 +363,17 @@ func (server *SLPServer) Run(ctx context.Context) {
 
 	go func() {
 		for {
-			str := fmt.Sprintf("Clients: %v | Upload: %vKB/s | Dowload: %vKB/s", server.GetClientSize(), server.UploadLastSec.Load(), server.DownloadLastSec.Load())
+			time.Sleep(time.Second)
+			str := fmt.Sprintf("Clients: %v | Upload: %vKB/s | Download: %vKB/s                            \r", server.GetClientSize(), float64(server.UploadLastSec.Load())/100, float64(server.DownloadLastSec.Load())/100)
 			fmt.Print(str)
-			fmt.Print(strings.Repeat("\b", len(str)))
+			server.DownloadLastSec.Store(0)
+			server.UploadLastSec.Store(0)
 			server.Tidy()
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
-			time.Sleep(time.Second)
 		}
 	}()
 }
