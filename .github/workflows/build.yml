@@ -26,6 +26,7 @@ jobs:
         goos: ${{ matrix.goos }}
         goarch: ${{ matrix.goarch }}
         extra_files: LICENSE
+        pre_command: "go mod tidy"
         binary_name: golang-slp-server
         release_tag: ${{ github.ref_name }}
         overwrite: true
