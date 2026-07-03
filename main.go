@@ -66,7 +66,7 @@ func main() {
 	var server Server
 	if preferGnetServer {
 		gnetServer := NewGnetSLPServer(port, authProvider)
-		go gnetServer.Run()
+		go gnetServer.Run(ctx)
 		server = gnetServer
 	} else {
 		udpServer := NewSLPServer(port, authProvider)

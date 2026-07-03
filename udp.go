@@ -29,7 +29,16 @@ const (
 	OutputEncrypted = false
 )
 
-var FowarderTypeName = []string{"Keepalive", "Ipv4", "Ping", "Ipv4Frag", "AuthMe"}
+var FowarderTypeName = make([]string, 0x11)
+
+func init() {
+	FowarderTypeName[0] = "Keepalive"
+	FowarderTypeName[1] = "Ipv4"
+	FowarderTypeName[2] = "Ping"
+	FowarderTypeName[3] = "Ipv4Frag"
+	FowarderTypeName[4] = "Auth"
+	FowarderTypeName[0x10] = "Info"
+}
 
 type CacheItem struct {
 	*Peer
@@ -365,8 +374,7 @@ func (server *SLPServer) Run(ctx context.Context) {
 	go func() {
 		for {
 			time.Sleep(time.Second)
-			str := fmt.Sprintf("Clients: %v | Upload: %vKB/s | Download: %vKB/s                            \r", server.GetClientSize(), float64(server.UploadLastSec.Load())/100, float64(server.DownloadLastSec.Load())/100)
-			fmt.Print(str)
+			fmt.Printf("\033[2K\rClients: %v | Upload: %vKB/s | Download: %vKB/s", server.GetClientSize(), float64(server.UploadLastSec.Load())/100, float64(server.DownloadLastSec.Load())/100)
 			server.DownloadLastSec.Store(0)
 			server.UploadLastSec.Store(0)
 			server.Tidy()
