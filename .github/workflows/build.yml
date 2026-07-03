@@ -19,7 +19,7 @@ jobs:
             goarch: arm64
     steps:
     - uses: actions/checkout@v4
-    - uses: wangyoucao577/go-release-action@1.55
+    - uses: wangyoucao577/go-release-action@v1.55
       name: Go build binaries and upload to release
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
