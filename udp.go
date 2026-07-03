@@ -235,6 +235,7 @@ func (server *SLPServer) OnNeedAuth(peer *Peer, fwdType FowarderType, payload []
 			randBytes := make([]byte, 65)
 			rand.Read(randBytes)
 			randBytes[0] = 0
+			peer.Challenge = randBytes
 		}
 
 		server.SendTo(peer, AuthMe, peer.Challenge)

@@ -21,6 +21,7 @@ var port int
 var debug bool
 var ignoreKeepaliveDebug bool
 var pprof bool
+var preferGnetServer bool
 
 func init() {
 	flag.StringVar(&httpAuth, "httpAuth", "", "define HttpAuthProvider url")
@@ -30,15 +31,17 @@ func init() {
 	flag.BoolVar(&debug, "debug", false, "enable debug messages")
 	flag.BoolVar(&ignoreKeepaliveDebug, "ikdebug", false, "ignore Keepalive debug messages")
 	flag.BoolVar(&pprof, "pprof", false, "enable pprof profiling server")
+	flag.BoolVar(&preferGnetServer, "gnet", false, "use Gnet server")
+
 	flag.Parse()
 }
 
 func main() {
-	var provider AuthProvider
+	var authProvider AuthProvider
 	if httpAuth != "" {
-		provider = NewHttpAuthProvider(httpAuth)
+		authProvider = NewHttpAuthProvider(httpAuth)
 	} else if jsonAuth != "" {
-		provider = NewJsonAuthProvider(jsonAuth)
+		authProvider = NewJsonAuthProvider(jsonAuth)
 	} else if simpleAuth != "" {
 		args := strings.Split(simpleAuth, ":")
 		if len(args) != 2 {
@@ -60,9 +63,18 @@ func main() {
 		}()
 	}
 
-	udpServer := NewSLPServer(port, provider)
-	udpServer.Run(ctx)
-	RunMonitor(ctx, udpServer, port)
+	var server Server
+	if preferGnetServer {
+		gnetServer := NewGnetSLPServer(port, authProvider)
+		go gnetServer.Run()
+		server = gnetServer
+	} else {
+		udpServer := NewSLPServer(port, authProvider)
+		udpServer.Run(ctx)
+		server = udpServer
+	}
+
+	RunMonitor(ctx, server, port)
 
 	<-ctx.Done()
 	fmt.Print("\n")

@@ -7,7 +7,11 @@ import (
 	"net/http"
 )
 
-func RunMonitor(ctx context.Context, udp *SLPServer, port int) {
+type Server interface {
+	GetClientSize() int
+}
+
+func RunMonitor(ctx context.Context, udp Server, port int) {
 	handler := http.NewServeMux()
 	server := &http.Server{
 		Addr: ":"+fmt.Sprint(port),
