@@ -25,7 +25,7 @@ jobs:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         goos: ${{ matrix.goos }}
         goarch: ${{ matrix.goarch }}
-        extra_files: LICENSE
+        extra_files: LICENSE.txt
         pre_command: "go mod tidy"
         binary_name: golang-slp-server
         release_tag: ${{ github.ref_name }}
