@@ -330,7 +330,7 @@ func (server *SLPServer) Run(ctx context.Context) {
 		}
 		defer conn.Close()
 
-		buffer := make([]byte, 4096)
+		buffer := make([]byte, 1500)
 
 		slog.Info("Server listening on " + conn.LocalAddr().String())
 
