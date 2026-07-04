@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -22,6 +23,8 @@ var debug bool
 var ignoreKeepaliveDebug bool
 var pprof bool
 var preferGnetServer bool
+var multicore bool
+var mux = &sync.Mutex{}
 
 func init() {
 	flag.StringVar(&httpAuth, "httpAuth", "", "define HttpAuthProvider url")
@@ -32,6 +35,7 @@ func init() {
 	flag.BoolVar(&ignoreKeepaliveDebug, "ikdebug", false, "ignore Keepalive debug messages")
 	flag.BoolVar(&pprof, "pprof", false, "enable pprof profiling server")
 	flag.BoolVar(&preferGnetServer, "gnet", false, "use Gnet server")
+	flag.BoolVar(&multicore, "multicore", false, "enable Gnet multicore")
 
 	flag.Parse()
 }

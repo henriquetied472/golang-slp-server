@@ -27,14 +27,9 @@ var timeout time.Duration = 30 // seconds
 
 type GnetPeerManager map[uint64]*GnetPeer
 
-func (pm GnetPeerManager) GetPeer(addr *net.UDPAddr) *GnetPeer {
+func (pm GnetPeerManager) GetPeer(addr *net.UDPAddr, conn gnet.Conn) *GnetPeer {
 	uintAddr := UPDAddrToUint64(addr)
 	if _, ok := pm[uintAddr]; !ok {
-		conn, err := client.Dial("udp", addr.String())
-		if err != nil {
-			slog.Error("GetPeer: couldn't stabilish a connection:", "addr", addr.String(), "error", err.Error())
-			return nil
-		}
 		pm[uintAddr] = &GnetPeer{RInfo: addr, Conn: conn}
 	}
 	pm[uintAddr].ExpireAt = time.Now().Add(timeout * time.Second)
@@ -47,7 +42,7 @@ func (pm GnetPeerManager) DeletePeer(addr *net.UDPAddr) {
 	delete(pm, uintAddr)
 }
 
-func Tidy(pm map[uint64]*GnetPeer, isIpTable bool) {
+func Tidy[Uint uint64 | uint32](pm map[Uint]*GnetPeer, isIpTable bool) {
 	var tydyType string
 	if isIpTable {
 		tydyType = "IPTable"
@@ -55,6 +50,7 @@ func Tidy(pm map[uint64]*GnetPeer, isIpTable bool) {
 		tydyType = "GnetPeerManager"
 	}
 
+	mux.Lock()
 	for addr, peer := range pm {
 		if peer.ExpireAt.Compare(time.Now()) < 0 {
 			slog.Debug("TidyPeers: Deleting expired peer at "+tydyType+":", "addr", peer.RInfo.String())
@@ -62,13 +58,14 @@ func Tidy(pm map[uint64]*GnetPeer, isIpTable bool) {
 			delete(pm, addr)
 		}
 	}
+	mux.Unlock()
 }
 
 type GnetSLPServer struct {
 	*gnet.BuiltinEventEngine
 
 	GnetPeerManager
-	IPTable         map[uint64]*GnetPeer
+	IPTable         map[uint32]*GnetPeer
 	UploadLastSec   atomic.Uint64
 	DownloadLastSec atomic.Uint64
 	AuthProvider
@@ -88,7 +85,7 @@ func UPDAddrToUint64(addr *net.UDPAddr) uint64 {
 func NewGnetSLPServer(port int, auth AuthProvider) *GnetSLPServer {
 	return &GnetSLPServer{
 		GnetPeerManager: make(GnetPeerManager),
-		IPTable:         make(map[uint64]*GnetPeer),
+		IPTable:         make(map[uint32]*GnetPeer),
 		UploadLastSec:   atomic.Uint64{},
 		DownloadLastSec: atomic.Uint64{},
 		AuthProvider:    auth,
@@ -108,7 +105,9 @@ func (srv *GnetSLPServer) OnTraffic(conn gnet.Conn) gnet.Action {
 	fwdType := FowarderType(msg[0] & 0x7f)
 	payload := msg[1:]
 
-	peer := srv.GetPeer(addr)
+	mux.Lock()
+	peer := srv.GetPeer(addr, conn)
+	mux.Unlock()
 
 	if fwdType != Keepalive || !ignoreKeepaliveDebug {
 		slog.Debug("OnTraffic: New message:", "rinfo", addr.String(), "type", FowarderTypeName[fwdType], "size", len(payload))
@@ -122,7 +121,7 @@ func (srv *GnetSLPServer) OnTraffic(conn gnet.Conn) gnet.Action {
 	case Ipv4:
 		srv.OnIpv4(peer, payload)
 	case Ping:
-		srv.OnPing(peer, payload)
+		srv.OnPing(peer, msg)
 	case Ipv4Frag:
 		srv.OnPing(peer, payload)
 	}
@@ -151,11 +150,29 @@ func (srv *GnetSLPServer) OnNeedAuth(peer *GnetPeer, fwdType FowarderType, paylo
 }
 
 func (srv *GnetSLPServer) OnIpv4(peer *GnetPeer, payload []byte) {
+	if len(payload) <= 20 { return }
 
+	var src, dst uint32
+	src = uint32(payload[12]) << 24 | uint32(payload[13]) << 16 | uint32(payload[14]) << 8 | uint32(payload[15])
+	dst = uint32(payload[16]) << 24 | uint32(payload[17]) << 16 | uint32(payload[18]) << 8 | uint32(payload[19])
+
+	slog.Debug("OnIpv4: New Ipv4 packet:", "from", fmt.Sprintf("%#.8x", src), "to", fmt.Sprintf("%#.8x", dst))
+
+	mux.Lock()
+	srv.IPTable[src] = peer
+	dstPeer, ok := srv.IPTable[dst]
+	mux.Unlock()
+	if ok {
+		slog.Debug("OnIpv4: destination ip is in cache")
+		srv.Send(dstPeer, Ipv4, payload, false)
+	} else {
+		slog.Debug("OnIpv4: destination ip is not in cache")
+		srv.Broadcast(peer, Ipv4, payload)
+	}
 }
 
-func (srv *GnetSLPServer) OnPing(peer *GnetPeer, payload []byte) {
-
+func (srv *GnetSLPServer) OnPing(peer *GnetPeer, msg []byte) {
+	srv.Send(peer, Ping, msg[:4], true)
 }
 
 func (srv *GnetSLPServer) OnIpv4Frag(peer *GnetPeer, payload []byte) {
@@ -171,17 +188,21 @@ func (srv *GnetSLPServer) Send(peer *GnetPeer, fwdType FowarderType, msg []byte,
 		return
 	}
 
-	_, err := peer.Conn.Write(append([]byte{byte(fwdType)}, msg...))
+	n, err := peer.Conn.Write(append([]byte{byte(fwdType)}, msg...))
 	if err != nil {
 		slog.Error("GnetSLPServer.Send: error while trying to send message:", "rinfo", peer.RInfo.String(), "type", FowarderTypeName[fwdType], "err", err.Error())
 	}
+	slog.Debug("Send: Wrote", "size", n, "to", peer.RInfo.String())
 }
 
 func (srv *GnetSLPServer) Broadcast(except *GnetPeer, fwdType FowarderType, msg []byte) {
+	mux.Lock()
 	for addr, peer := range srv.GnetPeerManager {
-		if addr == UPDAddrToUint64(peer.RInfo) { continue }
+		if addr == UPDAddrToUint64(except.RInfo) { continue }
+		slog.Debug("Broadcast: Sending a message:", "from", except.RInfo.String(), "to", peer.RInfo.String(), "size", len(msg)+1)
 		srv.Send(peer, fwdType, msg, false)
 	}
+	mux.Unlock()
 }
 
 func (srv *GnetSLPServer) Run(ctx context.Context) {
@@ -190,8 +211,9 @@ func (srv *GnetSLPServer) Run(ctx context.Context) {
 	if err != nil {
 		panic(err)
 	}
+	client.Start()
 
-	log.Fatalln(gnet.Run(srv, "udp://:"+fmt.Sprint(port), gnet.WithMulticore(true), gnet.WithTicker(true), gnet.WithLogger(&Logger{Level: InfoLevel})))
+	log.Fatalln(gnet.Run(srv, "udp://:"+fmt.Sprint(port), gnet.WithTicker(true), gnet.WithMulticore(multicore), gnet.WithLogger(&Logger{Level: InfoLevel})))
 }
 
 type Logger struct {
