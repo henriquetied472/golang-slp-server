@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"log/slog"
@@ -13,9 +14,7 @@ import (
 )
 
 type GnetPeer struct {
-	User *struct {
-		Username, Key string
-	}
+	Username string
 	Challenge []byte
 	RInfo     *net.UDPAddr
 	ExpireAt  time.Time
@@ -74,7 +73,7 @@ type GnetSLPServer struct {
 func UPDAddrToUint64(addr *net.UDPAddr) uint64 {
 	ip := addr.IP.To4()
 	if ip == nil {
-		slog.Error("UDPAddrToUint64: addr is not Ipv4")
+		slog.Error("UDPAddrToUint64: Addr is not Ipv4")
 		return 0
 	}
 
@@ -96,7 +95,7 @@ func (srv *GnetSLPServer) OnTraffic(conn gnet.Conn) gnet.Action {
 	addr := conn.RemoteAddr().(*net.UDPAddr)
 	msg, err := conn.Next(-1)
 	if err != nil {
-		slog.Error("OnTraffic: error while trying to read message:", "error", err.Error())
+		slog.Error("OnTraffic: Error while trying to read message:", "error", err.Error())
 		return gnet.None
 	}
 
@@ -113,7 +112,7 @@ func (srv *GnetSLPServer) OnTraffic(conn gnet.Conn) gnet.Action {
 		slog.Debug("OnTraffic: New message:", "rinfo", addr.String(), "type", FowarderTypeName[fwdType], "size", len(payload))
 	}
 
-	if srv.AuthProvider != nil && peer.User == nil {
+	if srv.AuthProvider != nil && peer.Username == "" {
 		srv.OnNeedAuth(peer, fwdType, payload)
 	}
 
@@ -146,7 +145,46 @@ func (srv *GnetSLPServer) GetClientSize() int {
 }
 
 func (srv *GnetSLPServer) OnNeedAuth(peer *GnetPeer, fwdType FowarderType, payload []byte) {
+	if fwdType == AuthMe {
+		if srv.AuthProvider != nil && peer.Challenge != nil {
+			if len(payload) <= 20 { return }
+			response := payload[:20]
+			username := string(payload[20:])
+			var err error
 
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			auth := make(chan bool)
+			go func(ch chan<- bool) {
+				ch <- srv.AuthProvider.Verify(username, peer.Challenge[1:], response)
+			}(auth)
+
+			select{
+			case success := <-auth:
+				if !success {
+					err = fmt.Errorf("OnNeedAuth: Wrong password")
+				} else {
+					peer.Username = username
+				}
+			case <-ctx.Done():
+				err = fmt.Errorf("OnNeedAuth: Authentication timeout")
+			}
+
+			if err != nil {
+				slog.Debug(err.Error(), "rinfo", peer.RInfo.String(), "username", username)
+				srv.Send(peer, Info, []byte(err.Error()), false)
+			}
+		}
+	} else {
+		if peer.Challenge == nil {
+			randBytes := make([]byte, 64)
+			rand.Read(randBytes)
+			peer.Challenge = append([]byte{0x00}, randBytes...)
+		}
+
+		srv.Send(peer, AuthMe, peer.Challenge, false)
+	}
 }
 
 func (srv *GnetSLPServer) OnIpv4(peer *GnetPeer, payload []byte) {
@@ -163,10 +201,8 @@ func (srv *GnetSLPServer) OnIpv4(peer *GnetPeer, payload []byte) {
 	dstPeer, ok := srv.IPTable[dst]
 	mux.Unlock()
 	if ok {
-		slog.Debug("OnIpv4: destination ip is in cache")
 		srv.Send(dstPeer, Ipv4, payload, false)
 	} else {
-		slog.Debug("OnIpv4: destination ip is not in cache")
 		srv.Broadcast(peer, Ipv4, payload)
 	}
 }
@@ -176,21 +212,37 @@ func (srv *GnetSLPServer) OnPing(peer *GnetPeer, msg []byte) {
 }
 
 func (srv *GnetSLPServer) OnIpv4Frag(peer *GnetPeer, payload []byte) {
+	if len(payload) <= 20 { return }
 
+	var src, dst uint32
+	src = uint32(payload[0]) << 24 | uint32(payload[1]) << 16 | uint32(payload[2]) << 8 | uint32(payload[3])
+	dst = uint32(payload[4]) << 24 | uint32(payload[5]) << 16 | uint32(payload[6]) << 8 | uint32(payload[7])
+
+	slog.Debug("OnIpv4Frag: New Ipv4Frag packet:", "from", fmt.Sprintf("%#.8x", src), "to", fmt.Sprintf("%#.8x", dst))
+
+	mux.Lock()
+	srv.IPTable[src] = peer
+	dstPeer, ok := srv.IPTable[dst]
+	mux.Unlock()
+	if ok {
+		srv.Send(dstPeer, Ipv4Frag, payload, false)
+	} else {
+		srv.Broadcast(peer, Ipv4Frag, payload)
+	}
 }
 
 func (srv *GnetSLPServer) Send(peer *GnetPeer, fwdType FowarderType, msg []byte, raw bool) {
 	if raw {
 		_, err := peer.Conn.Write(msg)
 		if err != nil {
-			slog.Error("GnetSLPServer.Send: error while trying to send raw message:", "rinfo", peer.RInfo.String(), "type", FowarderTypeName[fwdType], "err", err.Error())
+			slog.Error("GnetSLPServer.Send: Error while trying to send raw message:", "rinfo", peer.RInfo.String(), "type", FowarderTypeName[fwdType], "err", err.Error())
 		}
 		return
 	}
 
 	n, err := peer.Conn.Write(append([]byte{byte(fwdType)}, msg...))
 	if err != nil {
-		slog.Error("GnetSLPServer.Send: error while trying to send message:", "rinfo", peer.RInfo.String(), "type", FowarderTypeName[fwdType], "err", err.Error())
+		slog.Error("GnetSLPServer.Send: Error while trying to send message:", "rinfo", peer.RInfo.String(), "type", FowarderTypeName[fwdType], "err", err.Error())
 	}
 	slog.Debug("Send: Wrote", "size", n, "to", peer.RInfo.String())
 }

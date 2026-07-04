@@ -216,22 +216,20 @@ func (server *SLPServer) OnNeedAuth(peer *Peer, fwdType FowarderType, payload []
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			result := make(chan bool)
+			auth := make(chan bool)
 			go func(ch chan<- bool) {
 				ch <- server.AuthProvider.Verify(username, peer.Challenge[1:], response)
-			}(result)
+			}(auth)
 
-			correctPassword := false
 			select {
-			case res := <-result:
-				correctPassword = res
+			case success := <-auth:
+				if !success {
+					err = fmt.Errorf("login: wrong password")
+				} else {
+					peer.User.Username = username
+				}
 			case <-ctx.Done():
 				err = fmt.Errorf("login: authentication timeout")
-			}
-
-			if !correctPassword {
-				err = fmt.Errorf("login: incorrect password")
-
 			}
 
 			if err != nil {
