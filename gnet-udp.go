@@ -137,7 +137,7 @@ func (srv *GnetSLPServer) OnTick() (delay time.Duration, action gnet.Action) {
 	srv.DownloadLastSec.Store(0)
 	srv.UploadLastSec.Store(0)
 
-	return 1, gnet.None
+	return 1*time.Second, gnet.None
 }
 
 func (srv *GnetSLPServer) GetClientSize() int {
@@ -241,6 +241,7 @@ func (srv *GnetSLPServer) Send(peer *GnetPeer, fwdType FowarderType, msg []byte,
 	}
 
 	n, err := peer.Conn.Write(append([]byte{byte(fwdType)}, msg...))
+	srv.UploadLastSec.Add(uint64(n))
 	if err != nil {
 		slog.Error("GnetSLPServer.Send: Error while trying to send message:", "rinfo", peer.RInfo.String(), "type", FowarderTypeName[fwdType], "err", err.Error())
 	}
