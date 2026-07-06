@@ -1,6 +1,6 @@
 # Golang Switch Lan Play Server
 
-This project is a reimplementation of [spacemeowx2 Switch Lan Play server](https://github.com/spacemeowx2/switch-lan-play) made using [Golang](https://go.dev), aiming better resource saving (it runs with ~9MB of ram on x86_64 and ~2MB on arm64) and better performance.
+This project is a reimplementation of [spacemeowx2 Switch Lan Play server](https://github.com/spacemeowx2/switch-lan-play) made using [Golang](https://go.dev), aiming better resource saving (it runs with ~9MB of ram) and better performance.
 
 ## Usage
 
