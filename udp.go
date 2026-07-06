@@ -162,11 +162,11 @@ func (server *SLPServer) OnMessage(msg []byte, rinfo net.Addr) {
 		server.OnPing(rinfo, msg)
 		return
 	}
-	
+
 	peer := server.PeerManager.Get(rinfo)
 	payload := msg[1:]
-	
-	if slog.Default().Enabled(context.Background(), slog.LevelDebug) && (ignoreKeepaliveDebug == (head.FowarderType!=0)) {
+
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) && (ignoreKeepaliveDebug == (head.FowarderType != 0)) {
 		var fwdTypeName string
 		if int(head.FowarderType) < len(FowarderTypeName) {
 			fwdTypeName = FowarderTypeName[head.FowarderType]
@@ -372,7 +372,11 @@ func (server *SLPServer) Run(ctx context.Context) {
 	go func() {
 		for {
 			time.Sleep(time.Second)
-			fmt.Printf("\033[2K\rClients: %v | Upload: %vKB/s | Download: %vKB/s", server.GetClientSize(), float64(server.UploadLastSec.Load())/100, float64(server.DownloadLastSec.Load())/100)
+
+			if !quiet {
+				fmt.Printf("\033[2K\rClients: %v | Upload: %vKB/s | Download: %vKB/s", server.GetClientSize(), float64(server.UploadLastSec.Load())/100, float64(server.DownloadLastSec.Load())/100)
+			}
+
 			server.DownloadLastSec.Store(0)
 			server.UploadLastSec.Store(0)
 			server.Tidy()

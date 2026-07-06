@@ -14,7 +14,7 @@ import (
 )
 
 type GnetPeer struct {
-	Username string
+	Username  string
 	Challenge []byte
 	RInfo     *net.UDPAddr
 	ExpireAt  time.Time
@@ -132,12 +132,14 @@ func (srv *GnetSLPServer) OnTick() (delay time.Duration, action gnet.Action) {
 	Tidy(srv.GnetPeerManager, false)
 	Tidy(srv.IPTable, true)
 
-	fmt.Printf("\033[2KClients: %v | Upload: %vKB/s | Download: %vKB/s\r", srv.GetClientSize(), float64(srv.UploadLastSec.Load())/100, float64(srv.DownloadLastSec.Load())/100)
+	if !quiet {
+		fmt.Printf("\033[2KClients: %v | Upload: %vKB/s | Download: %vKB/s\r", srv.GetClientSize(), float64(srv.UploadLastSec.Load())/100, float64(srv.DownloadLastSec.Load())/100)
+	}
 
 	srv.DownloadLastSec.Store(0)
 	srv.UploadLastSec.Store(0)
 
-	return 1*time.Second, gnet.None
+	return 1 * time.Second, gnet.None
 }
 
 func (srv *GnetSLPServer) GetClientSize() int {
@@ -160,7 +162,7 @@ func (srv *GnetSLPServer) OnNeedAuth(peer *GnetPeer, fwdType FowarderType, paylo
 				ch <- srv.AuthProvider.Verify(username, peer.Challenge[1:], response)
 			}(auth)
 
-			select{
+			select {
 			case success := <-auth:
 				if !success {
 					err = fmt.Errorf("OnNeedAuth: Wrong password")
@@ -191,8 +193,8 @@ func (srv *GnetSLPServer) OnIpv4(peer *GnetPeer, payload []byte) {
 	if len(payload) <= 20 { return }
 
 	var src, dst uint32
-	src = uint32(payload[12]) << 24 | uint32(payload[13]) << 16 | uint32(payload[14]) << 8 | uint32(payload[15])
-	dst = uint32(payload[16]) << 24 | uint32(payload[17]) << 16 | uint32(payload[18]) << 8 | uint32(payload[19])
+	src = uint32(payload[12])<<24 | uint32(payload[13])<<16 | uint32(payload[14])<<8 | uint32(payload[15])
+	dst = uint32(payload[16])<<24 | uint32(payload[17])<<16 | uint32(payload[18])<<8 | uint32(payload[19])
 
 	slog.Debug("OnIpv4: New Ipv4 packet:", "from", fmt.Sprintf("%#.8x", src), "to", fmt.Sprintf("%#.8x", dst))
 
@@ -215,8 +217,8 @@ func (srv *GnetSLPServer) OnIpv4Frag(peer *GnetPeer, payload []byte) {
 	if len(payload) <= 20 { return }
 
 	var src, dst uint32
-	src = uint32(payload[0]) << 24 | uint32(payload[1]) << 16 | uint32(payload[2]) << 8 | uint32(payload[3])
-	dst = uint32(payload[4]) << 24 | uint32(payload[5]) << 16 | uint32(payload[6]) << 8 | uint32(payload[7])
+	src = uint32(payload[0])<<24 | uint32(payload[1])<<16 | uint32(payload[2])<<8 | uint32(payload[3])
+	dst = uint32(payload[4])<<24 | uint32(payload[5])<<16 | uint32(payload[6])<<8 | uint32(payload[7])
 
 	slog.Debug("OnIpv4Frag: New Ipv4Frag packet:", "from", fmt.Sprintf("%#.8x", src), "to", fmt.Sprintf("%#.8x", dst))
 
@@ -276,7 +278,7 @@ type Logger struct {
 type LogLevel int
 
 const (
-	DebugLevel LogLevel = iota -1
+	DebugLevel LogLevel = iota - 1
 	InfoLevel
 	WarnLevel
 	ErrorLevel

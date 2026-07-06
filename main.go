@@ -24,6 +24,7 @@ var ignoreKeepaliveDebug bool
 var pprof bool
 var preferGnetServer bool
 var multicore bool
+var quiet bool
 var mux = &sync.Mutex{}
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	flag.BoolVar(&pprof, "pprof", false, "enable pprof profiling server")
 	flag.BoolVar(&preferGnetServer, "gnet", false, "use Gnet server")
 	flag.BoolVar(&multicore, "multicore", false, "enable Gnet multicore")
+	flag.BoolVar(&quiet, "quiet", false, "disable the server monitoring messages (Client: xxx ...)")
 
 	flag.Parse()
 }
@@ -51,6 +53,7 @@ func main() {
 		if len(args) != 2 {
 			log.Fatalln("Bad value (use username:password)")
 		}
+		authProvider = NewCustomAuthProvider(args[0], args[1])
 	}
 
 	if debug {
