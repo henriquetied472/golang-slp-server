@@ -1,6 +1,6 @@
 # Golang Switch Lan Play Server
 
-This project is a reimplementation of [spacemeowx2 Switch Lan Play server](https://github.com/spacemeowx2/switch-lan-play) made using [Golang](https://go.dev), aiming better resource saving (it runs with ~8MB of ram) and better performance.
+This project is a reimplementation of [spacemeowx2 Switch Lan Play server](https://github.com/spacemeowx2/switch-lan-play) made using [Golang](https://go.dev), aiming better resource saving (it runs with ~9MB of ram on x86_64 and ~2MB on arm64) and better performance.
 
 ## Usage
 
@@ -15,7 +15,10 @@ It has some options, like:
 - `-simpleAuth USERNAME:PASSWORD` for just simple authentication
 - `-debug` show debug messages
 - `-ikdebug` ignore Keepalive debug messages
-
+- `-gnet` switches the server to GNet (improved performance and make multicore available)
+- `-multicore` activates multicore *only in GNet server mode*
+- `-quiet` deactivates the server monitoring message (`Client: xxx...`)
+- `-pprof` activates the Golang's `pprof` tool for performance and resource profiling
 
 ## Authentication
 
