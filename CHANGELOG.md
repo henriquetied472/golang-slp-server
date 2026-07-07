@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Sharded maps implementation for lowering lock time for PeerManager and IPTable
+
+### Changed
+
+- Use sharded maps as the new strategy for concurrency rather than pure single mutexes
+
 ## [v1.1.0] - 2026-07-06
 
 This release adds [GNet](https://github.com/panjf2000/gnet/v2) as a new engine for the UDP server, enabling multicore for processing packets, as well as adding the golang's pprof tool suppor for profiling.

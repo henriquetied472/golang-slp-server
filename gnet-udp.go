@@ -24,24 +24,24 @@ type GnetPeer struct {
 var client *gnet.Client
 var timeout time.Duration = 30 // seconds
 
-type GnetPeerManager map[uint64]*GnetPeer
+type GnetPeerManager struct {
+	PeerCount int
+	*ShardMap[uint64]
+}
 
-func (pm GnetPeerManager) GetPeer(addr *net.UDPAddr, conn gnet.Conn) *GnetPeer {
+func (pm *GnetPeerManager) GetPeer(addr *net.UDPAddr, conn gnet.Conn) *GnetPeer {
 	uintAddr := UPDAddrToUint64(addr)
-	if _, ok := pm[uintAddr]; !ok {
-		pm[uintAddr] = &GnetPeer{RInfo: addr, Conn: conn}
+	peer, ok := pm.Get(uintAddr)
+	if !ok {
+		peer = &GnetPeer{RInfo: addr, Conn: conn}
+		pm.PeerCount++
 	}
-	pm[uintAddr].ExpireAt = time.Now().Add(timeout * time.Second)
-	return pm[uintAddr]
+	peer.ExpireAt = time.Now().Add(timeout * time.Second)
+	pm.Set(uintAddr, peer)
+	return peer
 }
 
-func (pm GnetPeerManager) DeletePeer(addr *net.UDPAddr) {
-	uintAddr := UPDAddrToUint64(addr)
-	pm[uintAddr].Conn.Close()
-	delete(pm, uintAddr)
-}
-
-func Tidy[Uint uint64 | uint32](pm map[Uint]*GnetPeer, isIpTable bool) {
+func Tidy[Uint uint64 | uint32](table *ShardMap[Uint], isIpTable bool) int {
 	var tydyType string
 	if isIpTable {
 		tydyType = "IPTable"
@@ -49,22 +49,28 @@ func Tidy[Uint uint64 | uint32](pm map[Uint]*GnetPeer, isIpTable bool) {
 		tydyType = "GnetPeerManager"
 	}
 
-	mux.Lock()
-	for addr, peer := range pm {
-		if peer.ExpireAt.Compare(time.Now()) < 0 {
-			slog.Debug("TidyPeers: Deleting expired peer at "+tydyType+":", "addr", peer.RInfo.String())
-			peer.Conn.Close()
-			delete(pm, addr)
+	count := 0
+	for _, shard := range table.Shards {
+		shard.Lock()
+		for addr, peer := range shard.data {
+			if peer.ExpireAt.Compare(time.Now()) < 0 {
+				slog.Debug("TidyPeers: Deleting expired peer at "+tydyType+":", "addr", peer.RInfo.String())
+				peer.Conn.Close()
+				delete(shard.data, addr)
+				count++
+			}
 		}
+		shard.Unlock()
 	}
-	mux.Unlock()
+
+	return count
 }
 
 type GnetSLPServer struct {
 	*gnet.BuiltinEventEngine
 
-	GnetPeerManager
-	IPTable         map[uint32]*GnetPeer
+	*GnetPeerManager
+	IPTable         *ShardMap[uint32]
 	UploadLastSec   atomic.Uint64
 	DownloadLastSec atomic.Uint64
 	AuthProvider
@@ -83,8 +89,8 @@ func UPDAddrToUint64(addr *net.UDPAddr) uint64 {
 
 func NewGnetSLPServer(port int, auth AuthProvider) *GnetSLPServer {
 	return &GnetSLPServer{
-		GnetPeerManager: make(GnetPeerManager),
-		IPTable:         make(map[uint32]*GnetPeer),
+		GnetPeerManager: &GnetPeerManager{0, NewShardMap[uint64](32)},
+		IPTable:         NewShardMap[uint32](32),
 		UploadLastSec:   atomic.Uint64{},
 		DownloadLastSec: atomic.Uint64{},
 		AuthProvider:    auth,
@@ -104,9 +110,7 @@ func (srv *GnetSLPServer) OnTraffic(conn gnet.Conn) gnet.Action {
 	fwdType := FowarderType(msg[0] & 0x7f)
 	payload := msg[1:]
 
-	mux.Lock()
 	peer := srv.GetPeer(addr, conn)
-	mux.Unlock()
 
 	if fwdType != Keepalive || !ignoreKeepaliveDebug {
 		slog.Debug("OnTraffic: New message:", "rinfo", addr.String(), "type", FowarderTypeName[fwdType], "size", len(payload))
@@ -129,7 +133,7 @@ func (srv *GnetSLPServer) OnTraffic(conn gnet.Conn) gnet.Action {
 }
 
 func (srv *GnetSLPServer) OnTick() (delay time.Duration, action gnet.Action) {
-	Tidy(srv.GnetPeerManager, false)
+	srv.GnetPeerManager.PeerCount -= Tidy(srv.GnetPeerManager.ShardMap, false)
 	Tidy(srv.IPTable, true)
 
 	if !quiet {
@@ -143,7 +147,7 @@ func (srv *GnetSLPServer) OnTick() (delay time.Duration, action gnet.Action) {
 }
 
 func (srv *GnetSLPServer) GetClientSize() int {
-	return len(srv.GnetPeerManager)
+	return srv.GnetPeerManager.PeerCount
 }
 
 func (srv *GnetSLPServer) OnNeedAuth(peer *GnetPeer, fwdType FowarderType, payload []byte) {
@@ -198,10 +202,8 @@ func (srv *GnetSLPServer) OnIpv4(peer *GnetPeer, payload []byte) {
 
 	slog.Debug("OnIpv4: New Ipv4 packet:", "from", fmt.Sprintf("%#.8x", src), "to", fmt.Sprintf("%#.8x", dst))
 
-	mux.Lock()
-	srv.IPTable[src] = peer
-	dstPeer, ok := srv.IPTable[dst]
-	mux.Unlock()
+	srv.IPTable.Set(src, peer)
+	dstPeer, ok := srv.IPTable.Get(dst)
 	if ok {
 		srv.Send(dstPeer, Ipv4, payload, false)
 	} else {
@@ -222,10 +224,8 @@ func (srv *GnetSLPServer) OnIpv4Frag(peer *GnetPeer, payload []byte) {
 
 	slog.Debug("OnIpv4Frag: New Ipv4Frag packet:", "from", fmt.Sprintf("%#.8x", src), "to", fmt.Sprintf("%#.8x", dst))
 
-	mux.Lock()
-	srv.IPTable[src] = peer
-	dstPeer, ok := srv.IPTable[dst]
-	mux.Unlock()
+	srv.IPTable.Set(src, peer)
+	dstPeer, ok := srv.IPTable.Get(dst)
 	if ok {
 		srv.Send(dstPeer, Ipv4Frag, payload, false)
 	} else {
@@ -251,13 +251,17 @@ func (srv *GnetSLPServer) Send(peer *GnetPeer, fwdType FowarderType, msg []byte,
 }
 
 func (srv *GnetSLPServer) Broadcast(except *GnetPeer, fwdType FowarderType, msg []byte) {
-	mux.Lock()
-	for addr, peer := range srv.GnetPeerManager {
-		if addr == UPDAddrToUint64(except.RInfo) { continue }
-		slog.Debug("Broadcast: Sending a message:", "from", except.RInfo.String(), "to", peer.RInfo.String(), "size", len(msg)+1)
-		srv.Send(peer, fwdType, msg, false)
+	for _, shard := range srv.GnetPeerManager.Shards {
+		shard.RLock()
+		for addr, peer := range shard.data {
+			if addr == UPDAddrToUint64(except.RInfo) {
+				continue
+			}
+			slog.Debug("Broadcast: Sending a message:", "from", except.RInfo.String(), "to", peer.RInfo.String(), "size", len(msg)+1)
+			srv.Send(peer, fwdType, msg, false)
+		}
+		shard.RUnlock()
 	}
-	mux.Unlock()
 }
 
 func (srv *GnetSLPServer) Run(ctx context.Context) {

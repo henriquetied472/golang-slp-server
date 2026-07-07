@@ -10,10 +10,13 @@ import (
 )
 
 func TestStress(t *testing.T) {
-	addr, _ := net.ResolveUDPAddr("udp", "rowlet-lp.ddns.net:39158")
-	
-	simultaneosClients := 7
-	duration := 25 * time.Second
+	addr, err := net.ResolveUDPAddr("udp", ":11451")
+	if err != nil {
+		panic(err)
+	}
+
+	simultaneosClients := 60
+	duration := 20 * time.Second
 
 	wg := sync.WaitGroup{}
 	wg.Add(simultaneosClients)
@@ -27,7 +30,7 @@ func TestStress(t *testing.T) {
 				panic(err)
 			}
 
-			payload := make([]byte, 1400)
+			payload := make([]byte, 400)
 			rand.Read(payload)
 			payload[0] = 0x01
 			payload[12], payload[13] = 0x0a, 0x0d
