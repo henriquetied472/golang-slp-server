@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.2] - 2026-07-07
+
+### Fixes
+
+- Hot fix for shard map ignoring uint64 case when GetShardKey
+
 ## [v1.1.1] - 2026-07-07
 
 ### Added
