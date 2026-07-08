@@ -31,7 +31,12 @@ func NewShardMap[T uint32 | uint64](count int) *ShardMap[T] {
 
 func (shardmap *ShardMap[T]) GetShardKey(key T) uint32 {
 	hasher := fnv.New32()
-	hasher.Write([]byte{byte(key>>24), byte(key>>16), byte(key>>8), byte(key)})
+	switch any(key).(type) {
+	case uint32:
+		hasher.Write([]byte{byte(key>>24), byte(key>>16), byte(key>>8), byte(key)})
+	case uint64:
+		hasher.Write([]byte{byte(key>>40), byte(key>>32), byte(key>>24), byte(key>>16), byte(key>>8), byte(key)})
+	}
 	return hasher.Sum32() % uint32(shardmap.Count)
 }
 

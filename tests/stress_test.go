@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -48,4 +49,30 @@ func TestStress(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestLatency(t *testing.T) {
+	addr, err := net.ResolveUDPAddr("udp", "rowlet-lp.ddns.net:11451")
+	if err != nil {
+		panic(err)
+	}
+
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		panic(err)
+	}
+
+	ping := 83
+	average := 0.
+	for range ping {
+	conn.Write([]byte{0x02, 0x01, 0x01, 0x01})
+	now := time.Now()
+
+	conn.ReadFrom([]byte{})
+
+	delay := time.Since(now).Milliseconds()
+	fmt.Printf("Took %dms seconds to respond\n", delay)
+	average += float64(delay)/float64(ping)
+	}
+	fmt.Printf("Average: %fms", average)
 }
